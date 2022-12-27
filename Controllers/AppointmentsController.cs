@@ -15,7 +15,6 @@ using System.Text.Json;
  *  - Each patient appointment must have at least one week of separation
  *  - New patients can only be scheduled for 3pm and 4pm
  *  
- *  NOTE: Do not need to worry about "impossible to schedule appointments"
  */
 namespace Scheduler.Controllers
 {
@@ -36,9 +35,6 @@ namespace Scheduler.Controllers
             _config = config;
             _httpClientFactory = httpClientFactory;
             _logger = logger;
-
-            Console.WriteLine("Token");
-            Console.WriteLine(config["Client:ApiToken"]);
         }
 
         [HttpPost(Name = "GetAppointment")]
@@ -57,16 +53,19 @@ namespace Scheduler.Controllers
             return NoContent();
         }
 
+        /// <summary>
+        /// This task retrieves the initial schedule of all appointments, and then loops through each request in the queue
+        /// and schedules a new appointment.
+        /// </summary>
         private async Task ProcessRequests()
         {
-            //List<AppointmentRequest> appointmentRequests = new List<AppointmentRequest>();
-
-            IEnumerable<Appointment> schedule = await GetSchedule();
-            //IDictionary<int, List<DateTime>> doctorAppointments = new Dictionary<int, List<DateTime>>();
             IDictionary<int, List<DateTime>> personAppointments = new Dictionary<int, List<DateTime>>();
             IDictionary<DateTime, List<int>> appointmentDoctors = new Dictionary<DateTime, List<int>>();
 
-            // Create a map for persons appointments and doctors appointments
+            // Retrieve the initial schedule
+            IEnumerable<Appointment> schedule = await GetSchedule();
+
+            // Populate a map for persons appointments and doctors appointments
             foreach (Appointment appointment in schedule)
             {
                 AddAppointmentDoctor(appointment.appointmentTime, appointment.doctorId, ref appointmentDoctors);
@@ -111,9 +110,11 @@ namespace Scheduler.Controllers
             }
         }
 
+        /// <summary>
+        /// Adds a new appointment to a dictionary with the personId as they key, and appointment date as the value.
+        /// </summary>
         static private void AddPersonAppointment(int personId, DateTime appointmentTime, ref IDictionary<int, List<DateTime>> personAppointments, bool resort = true)
         {
-            // TODO: WHEN YOU ADD A NEW APPOINTMENT, YOU NEED TO RESORT THE VALUES
             if (personAppointments.TryGetValue(personId, out List<DateTime>? personSchedule))
             {
                 personSchedule.Add(appointmentTime);
@@ -129,6 +130,9 @@ namespace Scheduler.Controllers
             }
         }
 
+        /// <summary>
+        /// Adds a new appointment to a dictionary with the DateTime as they key, and doctorId as the value.
+        /// </summary>
         static private void AddAppointmentDoctor(DateTime appointmentTime, int doctorId, ref IDictionary<DateTime, List<int>> appointmentDoctors)
         {
             if (appointmentDoctors.TryGetValue(appointmentTime, out List<int>? doctorIds))
@@ -141,7 +145,14 @@ namespace Scheduler.Controllers
             }
         }
 
-        // We want to use only the calendar day and ignore hours, minutes, etc.
+        /// <summary>
+        /// Gets the difference in days between two dates, using only the Date (ie. not the full DateTime).
+        /// </summary>
+        /// <param name="dateTime1"></param>
+        /// <param name="dateTime2"></param>
+        /// <returns>
+        /// An integer representing the number of days.
+        /// </returns>
         static private int GetDaysBetweenDates(DateTime dateTime1, DateTime dateTime2)
         {
             DateOnly date1 = DateOnly.FromDateTime(dateTime1);
@@ -150,6 +161,15 @@ namespace Scheduler.Controllers
             return Math.Abs(date1.DayNumber - date2.DayNumber);
         }
 
+        /// <summary>
+        /// Determines whether a person is eligible to book an appointment given a list of appointments.
+        /// </summary>
+        /// <param name="appointmentsSorted"></param>
+        /// <param name="date"></param>
+        /// <param name="isNew"></param>
+        /// <returns>
+        /// A bool representing whether or not the appointment can be booked.
+        /// </returns>
         static private bool CanBeBooked(List<DateTime> appointmentsSorted, DateTime date, bool isNew)
         {
             // The next date, as compared to the date provided in the parameters
@@ -169,6 +189,7 @@ namespace Scheduler.Controllers
                 return true;
             }
 
+            // Find the next appointment after the date being checked
             for (int i = 0; i < appointmentsSorted.Count; i++)
             {
                 if (date <= appointmentsSorted[i])
@@ -178,7 +199,6 @@ namespace Scheduler.Controllers
                 }
             }
 
-            // NOTE: Use .Day so there is no rounding. We don't need exactly 7 days worth of time, just 7 days of separation on the calendar
             if (nextDateIndex.HasValue && nextDateIndex.GetValueOrDefault() > 0)
             {
                 // The date is somewhere between the smallest and greatest values
@@ -197,9 +217,17 @@ namespace Scheduler.Controllers
             }
         }
 
+        /// <summary>
+        /// Gets the ids of doctors available for a certain DateTime.
+        /// </summary>
+        /// <param name="appointmentDoctors"></param>
+        /// <param name="date"></param>
+        /// <returns>
+        /// An IEnumerable of integers representing ids of doctors available.
+        /// </returns>
         static private IEnumerable<int> GetAvailableDoctorsForDate(IDictionary<DateTime, List<int>> appointmentDoctors, DateTime date)
         {
-            // If the key doesn't exist, that means all doctors are available
+            // If the key doesn't exist yet, that means all doctors are available
             if (!appointmentDoctors.ContainsKey(date))
             {
                 return DoctorIds;
@@ -208,6 +236,15 @@ namespace Scheduler.Controllers
             return DoctorIds.Where(d1 => appointmentDoctors[date].All(d2 => d2 != d1));
         }
 
+        /// <summary>
+        /// Gets the next appointment time after the date provided in the parameters.
+        /// </summary>
+        /// <param name="date"></param>
+        /// <param name="canBeBooked"></param>
+        /// <param name="isNew"></param>
+        /// <returns>
+        /// A DateTime object representing the next appointment time.
+        /// </returns>
         static private DateTime GetNextDate(DateTime date, bool canBeBooked, bool isNew)
         {
             if (date.DayOfWeek == DayOfWeek.Saturday || date.DayOfWeek == DayOfWeek.Sunday)
@@ -230,12 +267,12 @@ namespace Scheduler.Controllers
             {
                 if (isNew)
                 {
-                    // Start from 3pm for new appointments
                     if (date.Hour >= NEW_APPOINTMENT_FIRST_HOUR)
                     {
                         return date.AddHours(1);
                     }
 
+                    // Start from 3pm for new appointments
                     return new DateTime(date.Year, date.Month, date.Day, NEW_APPOINTMENT_FIRST_HOUR, 0, 0);
                 }
                 else
@@ -252,6 +289,18 @@ namespace Scheduler.Controllers
             }
         }
 
+        /// <summary>
+        /// Generates an appointment time and doctor id of an appointment to be scheduled based on the given parameters.
+        /// When an ideal date for preferred doctor and date cannot be found, the method favors the preferred doctor.
+        /// </summary>
+        /// <param name="appointmentsSorted"></param>
+        /// <param name="appointmentDoctors"></param>
+        /// <param name="preferredDates"></param>
+        /// <param name="preferredDocs"></param>
+        /// <param name="isNew"></param>
+        /// <returns>
+        /// A tuple of (DateTime, int) representing the appointment time and doctor id that can be used.
+        /// </returns>
         static private (DateTime, int) GenerateAppointment(
             List<DateTime> appointmentsSorted,
             IDictionary<DateTime, List<int>> appointmentDoctors,
@@ -259,26 +308,18 @@ namespace Scheduler.Controllers
             List<int> preferredDocs,
             bool isNew)
         {
-            // TODO: Refactor code so there is less replication of code
             // First check preferred doctor/dates
             foreach (DateTime date in preferredDates)
             {
                 int hour = isNew ? NEW_APPOINTMENT_FIRST_HOUR : FIRST_APPOINTMENT_HOUR;
                 DateTime preferredStartDate = new(date.Year, date.Month, date.Day, hour, 0, 0);
 
-                // TODO: Instead of looping through each hour, skip the day entirely, or jump to 3pm if it's new
+                // Check every possible hour in the current date of preferredDates
                 while (DateOnly.FromDateTime(date) == DateOnly.FromDateTime(preferredStartDate))
                 {
-                    // TODO: FIX ME
-                    //int? preferredDoctor = appointmentDoctors[date].Intersect(preferredDocs).FirstOrDefault();
-
-                    // ACTUAL: It checks the preferred date at 12:00am
-                    // EXPECTED: It checks every valid time for the preferred date
                     IEnumerable<int> availableDoctors = GetAvailableDoctorsForDate(appointmentDoctors, preferredStartDate);
-
                     IEnumerable<int> availablePreferredDoctors = availableDoctors.Intersect(preferredDocs);
                     bool canBeBooked = CanBeBooked(appointmentsSorted, preferredStartDate, isNew);
-                    bool preferredDoctorIsAvailable = availablePreferredDoctors.Any();
 
                     if (canBeBooked && availablePreferredDoctors.Any())
                     {
@@ -309,7 +350,7 @@ namespace Scheduler.Controllers
 
                 if (appointmentDoctors[currentDate].Count < DoctorIds.Count)
                 {
-                    IEnumerable<int> availableDoctors = GetAvailableDoctorsForDate(appointmentDoctors, currentDate); //DoctorIds.Where(d1 => appointmentDoctors[currentDate].All(d2 => d2 != d1));
+                    IEnumerable<int> availableDoctors = GetAvailableDoctorsForDate(appointmentDoctors, currentDate);
                     IEnumerable<int> availablePreferredDoctors = availableDoctors.Intersect(preferredDocs);
 
                     if (canBeBooked)
@@ -321,7 +362,6 @@ namespace Scheduler.Controllers
                             appointmentDoctor = availablePreferredDoctors.First();
                             mostOptimalDateFound = true;
                         }
-                        // TODO: This also needs to find 
                         else if (preferredDates.FindAll(d => DateOnly.FromDateTime(d) == DateOnly.FromDateTime(currentDate)).Any() || appointmentDate is null)
                         {
                             appointmentDate = currentDate;
@@ -329,37 +369,6 @@ namespace Scheduler.Controllers
                         }
                     }
                 }
-
-                //// Proceed to the next possible time
-                //if (!canBeBooked)
-                //{
-                //    if (isNew)
-                //    {
-                //        // Skip to the new appointment time if it can't be booked and the appointment is new
-                //        currentDate = new DateTime(currentDate.Year, currentDate.Month, currentDate.Day, NEW_APPOINTMENT_FIRST_HOUR, 0, 0);
-                //    }
-                //    else
-                //    {
-                //        // Skip the whole day if it can't be booked
-                //        currentDate = currentDate.AddHours(24);
-                //    }
-                //}
-                //else if (currentDate.Hour < LAST_APPOINTMENT_HOUR)
-                //{
-                //    currentDate = currentDate.AddHours(1);
-                //} else
-                //{
-                //    currentDate = currentDate.AddHours(LAST_APPOINTMENT_HOUR); // Go from 5pm to 8am the next day
-
-                //    // Skip the weekend
-                //    if (currentDate.DayOfWeek == DayOfWeek.Saturday || currentDate.DayOfWeek == DayOfWeek.Sunday)
-                //    {
-                //        while (currentDate.DayOfWeek != DayOfWeek.Monday)
-                //        {
-                //            currentDate = currentDate.AddHours(24);
-                //        }
-                //    }
-                //}
 
                 currentDate = GetNextDate(currentDate, canBeBooked, isNew);
             }
@@ -396,7 +405,7 @@ namespace Scheduler.Controllers
             var httpResponseMessage = await httpClient.SendAsync(httpRequestMessage);
 
             // TODO: Since we are processing a batch at a time, this should probably log an error and allow the process to continue
-            // instead of attempting the remaining requests instead of throwing an error
+            // attempting the remaining requests instead of throwing an error
             if (!httpResponseMessage.IsSuccessStatusCode)
             {
                 // TODO: More specific error handling for API
