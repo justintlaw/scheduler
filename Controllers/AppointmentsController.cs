@@ -247,6 +247,8 @@ namespace Scheduler.Controllers
         /// </returns>
         static private DateTime GetNextDate(DateTime date, bool canBeBooked, bool isNew)
         {
+            // TODO: simplify this logic
+
             if (date.DayOfWeek == DayOfWeek.Saturday || date.DayOfWeek == DayOfWeek.Sunday)
             {
                 // Skip the weekend
