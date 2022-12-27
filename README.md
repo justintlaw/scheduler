@@ -10,8 +10,8 @@ application of this proof of concept, other options such as a nightly batch job 
  - Appointments may only be scheduled on the hour
  - Appointments may be scheduled from 8am UTC until 4pm UTC
  - Only weekdays from November 2021 - December 2021 are allowed
- - Appointments may be scheduled on Holidays
- - A doctor may only have one appointment per hour (but different doctors same time is okay)
+ - Appointments may be scheduled on holidays
+ - A doctor may only have one appointment per hour (but different doctors at the same time is okay)
  - Each appointment for a given patient must have at least one week of separation between their other appointments
  - New patients can only be scheduled for 3pm and 4pm
 
